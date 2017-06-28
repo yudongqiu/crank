@@ -29,7 +29,7 @@ from nifty import *
 if __name__ == "__main__":
     # Create the Work Queue.  We will only have one instance because the
     # script will try to maximize the efficiency of resource utilization.
-    wq_port = 7323
+    wq_port = 7324
     work_queue.set_debug_flag('all')
     wq = work_queue.WorkQueue(port=wq_port, exclusive=False, shutdown=False)
     wq.tasks_failed = 0 # Counter for tasks that fail at the application level
@@ -888,6 +888,8 @@ class DihedralGrid(object):
         # Initialize energy and geometry storage.
         self.energies = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
         self.geoms = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
+        self.grads = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
+        self.haveGrads = False
         # Set some labels and folders.
         self.name = name
         self.root = os.path.join("Scan", name)
@@ -1070,6 +1072,21 @@ class DihedralGrid(object):
             try:
                 E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
                 M1 = Molecule(os.path.join(dnm,"opt.xyz"))
+                # LPW hack to create optGrad.xyz if one does not exist.
+                if not os.path.exists(os.path.join(dnm,"optGrad.xyz")):
+                    print "LPW hack: Extracting %s and reading forces" % os.path.join(dnm,"qchem.out.bz2")
+                    # import IPython
+                    # IPython.embed()
+                    if os.path.exists(os.path.join(dnm,"qchem.out.bz2")):
+                        _exec("bunzip2 qchem.out.bz2", cwd=dnm, print_command=False)
+                    if not os.path.exists(os.path.join(dnm,"qchem.out")):
+                        raise RuntimeError("Argh?")
+                    Q = Molecule(os.path.join(dnm,"qchem.out"))[-1]
+                    Q.xyzs = Q.qm_grads
+                    Q.write(os.path.join(dnm,"optGrad.xyz"))
+                    _exec("bzip2 qchem.out", cwd=dnm, print_command=False)
+                F = Molecule(os.path.join(dnm,"optGrad.xyz"))
+                self.haveGrads = True
             except:
                 print dih12, "optimization failed"
                 worked = False
@@ -1092,12 +1109,14 @@ class DihedralGrid(object):
                 self.energies[dih12] = E
                 self.optnext.append([neighbors(dih1, dih2), (dih1, dih2)])
                 self.geoms[dih12] = M1.xyzs[0]
+                self.grads[dih12] = F.xyzs[0]
             elif E + 0.01 < self.energies[dih12]: 
                 status = 1
                 self.energies[dih12] = E
                 if [neighbors(dih1, dih2), (dih1, dih2)] not in self.optnext:
                     self.optnext.append([neighbors(dih1, dih2), (dih1, dih2)])
                 self.geoms[dih12] = M1.xyzs[0]
+                self.grads[dih12] = F.xyzs[0]
             elif E - 0.01 < self.energies[dih12]:
                 status = 2
             else:
@@ -1258,11 +1277,16 @@ class DihedralGrid(object):
         """ Print out the final energies to a file located in ALA/Scan/HF/scan.txt and also record the geometries. """
         mdnm = os.path.join(self.root, self.angles, self.method)
         xyzfin = []
+        enefin = []
+        grdfin = []
         commfin = []
         o = open(os.path.join(mdnm, 'scan.txt'),'w')
         for i in self.energies.items():
             if i[1]:
                 xyzfin.append(self.geoms[i[0]])
+                enefin.append(i[1]/627.51)
+                if self.haveGrads:
+                    grdfin.append(self.grads[i[0]])
                 commfin.append("Dihedral Angles = "+','.join(["%i" % j for j in i[0]]))
                 print >> o, i[0][0], i[0][1], i[1]
         o.close()
@@ -1280,8 +1304,12 @@ class DihedralGrid(object):
         Mfin = self.M
         Mfin.xyzs = xyzfin
         Mfin.comms = commfin
-        Mfin.align(select=sorted(list(set([self.iA, self.iB, self.iC, self.iD, self.iE, self.iF, self.iG, self.iH]))))
+        Mfin.align(atom_select=sorted(list(set([self.iA, self.iB, self.iC, self.iD, self.iE, self.iF, self.iG, self.iH]))))
         Mfin.write(os.path.join(mdnm, "scan.xyz"))
+        Mfin.qm_energies = enefin
+        if self.haveGrads:
+            Mfin.qm_grads = grdfin
+        Mfin.write(os.path.join(mdnm, "qdata.txt"))
         # Mfin.write(os.path.join(mdnm, "scan.pdb"))
 
 def main():
@@ -1295,6 +1323,10 @@ def main():
     M = Molecule("propanol.xyz")
     d1 = [0, 1, 6, 10]
     d2 = [1, 6, 10, 11]
+    
+    # M = Molecule("hexane.xyz")
+    # d1 = [0, 4, 7, 10]
+    # d2 = [4, 7, 10, 13]
 
     DG = DihedralGrid(M, 0, 1, method, d1, d2, "propanol")
 

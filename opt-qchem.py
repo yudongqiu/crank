@@ -15,7 +15,7 @@ _exec("touch qchem.out.prev")
 qcin = Molecule("qchem.in", ftype="qcin")
 qcin.edit_qcrems({'geom_opt_max_cycles':'100'})
 qcin.write("qchem.in")
-_exec("qchem42 %s qchem.in qchem.out &> qchem.err" % np)
+_exec("qchem %s qchem.in qchem.out &> qchem.err" % np)
 
 def special_criterion():
     mk = 0
@@ -74,7 +74,7 @@ while True:
         if Attempt < 8:
             qcin.write("qchem.in")
             _exec("cat qchem.out >> qchem.out.prev")
-            _exec("qchem42 %s qchem.in qchem.out 2> qchem.err" % np)
+            _exec("qchem %s qchem.in qchem.out 2> qchem.err" % np)
         if Attempt > 8: break # It should never do this
 
 _exec("mv qchem.out qchem.out_")
@@ -84,3 +84,8 @@ _exec("bzip2 qchem.out")
 M[-1].write("opt.xyz")
 E = M.qm_energies[-1]
 with open("energy.txt","w") as f: print >> f, "% .10f" % E
+
+F = M[-1]
+F.xyzs = F.qm_grads
+F.write("optGrad.xyz")
+
