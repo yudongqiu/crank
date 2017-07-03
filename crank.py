@@ -30,7 +30,7 @@ import argparse
 if __name__ == "__main__":
     # Create the Work Queue.  We will only have one instance because the
     # script will try to maximize the efficiency of resource utilization.
-    wq_port = 7323
+    wq_port = 7324
     work_queue.set_debug_flag('all')
     wq = work_queue.WorkQueue(port=wq_port, exclusive=False, shutdown=False)
     wq.tasks_failed = 0 # Counter for tasks that fail at the application level
@@ -1286,33 +1286,24 @@ class DihedralGrid(object):
         # Mfin.write(os.path.join(mdnm, "scan.pdb"))
 
 def main():
-    print "Usage: %s method" % __file__
-    print "where method is one of: %s" % (', '.join(MDict.keys()))
-    # prefix=coordinatefile[:-4]
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--methodopt', type=str, default="None", help='Enter scan method')
+    parser = argparse.ArgumentParser(description="Potential energy scan of two neighboring dihedral angles from -180 to 180 with a 24x24 grid.")
+    parser.add_argument('--methodopt', type=str, default="None", choices=MDict.keys(), help='Enter scan method ')
     parser.add_argument('input', type=str, help='Enter coordinate file')
-    parser.add_argument('indices', type=int, nargs=5, help='Enter in the atoms for the dihedral scan')
-    args = parser.parse_args(sys.argv[1:])
-    method=args.methodopt
-    xyzfile=args.input
-    prefix=xyzfile[:-4]
-    atom1=args.indices[0]
-    atom2=args.indices[1]
-    atom3=args.indices[2]
-    atom4=args.indices[3]
-    atom5=args.indices[4]
-
-    #method = sys.argv[1]
-    if method not in MDict.keys():
-        raise RuntimeError("method %s not implemented" % method)
-     
+    parser.add_argument('indices', type=int, nargs=5, help='List of atoms that the dihedral scan will be performed on. Enter 5 atomic indices. First 4 will define the first dihedral, last 4 will define the second dihedral.')
+    parser.add_argument('--charge', type=int, default=0,  nargs=1, help='Define the charge of the system')
+    args = parser.parse_args()
+    method = args.methodopt
+    xyzfile = args.input
+    prefix = os.path.splitext(xyzfile)[0]
+    charge=args.charge 
+    
+    atom1, atom2, atom3, atom4, atom5 = args.indices 
 
     M = Molecule(xyzfile)
     d1 = [atom1, atom2, atom3, atom4]
     d2 = [atom2, atom3, atom4, atom5]
 
-    DG = DihedralGrid(M, 0, 1, method, d1, d2, prefix)
+    DG = DihedralGrid(M, charge, 1, method, d1, d2, prefix)
 
     while True:
         # Determine which new optimizations to start
