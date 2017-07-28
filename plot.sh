@@ -1,15 +1,15 @@
 #!/bin/bash
 
 cat <<EOF > plot.gp
-set terminal pdf enhanced fname "Helvetica" fsize 5 size 2.5,2.5
+set terminal pdfcairo enhanced font "Helvetica" fontscale 0.5 size 5,5
 set output "scan.pdf"
 # set lmargin 0
 # set rmargin 0
 # set ytics nomirror
 EOF
 
-f=./Scan/propanol/0-1-6-10-11/RIMP2/scan.txt
-f1=./Scan/propanol/0-1-6-10-11/RIMP2/scanw.txt # Wrap around 180.
+f=./Scan/seph-dipeptide/5-7-9-15-17/HF/scan.txt
+f1=./Scan/seph-dipeptide/5-7-9-15-17/HF/scanw.txt # Wrap around 180.
 cat $f | awk '{printf "%i %i %s\n", $1, $2, $3} ($1 < -90) {printf "%i %i %s\n", $1+360, $2, $3} ($1 > 90) {printf "%i %i %s\n", $1-360, $2, $3}' | awk '{printf "%i %i %s\n", $1, $2, $3} ($2 < -90) {printf "%i %i %s\n", $1, $2+360, $3} ($2 > 90) {printf "%i %i %s\n", $1, $2-360, $3}' > $f1
 
 cat <<EOF >> plot.gp
