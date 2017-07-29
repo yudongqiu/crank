@@ -138,9 +138,9 @@ AtomVariableNames = set(['elem', 'partial_charge', 'atomname', 'atomtype', 'tink
 # qctemplate = The Q-Chem template file, not including the coordinates or rem variables
 # charge     = The net charge of the molecule
 # mult       = The spin multiplicity of the molecule
-MetaVariableNames = set(['fnm', 'ftype', 'qcrems', 'qctemplate', 'qcerr', 'charge', 'mult', 'bonds', 'topology', 'molecules'])
+MetaVariableNames = set(['fnm', 'ftype', 'qcrems', 'qctemplate', 'psitemplate', 'qcerr', 'charge', 'mult', 'bonds', 'topology', 'molecules'])
 # Variable names relevant to quantum calculations explicitly
-QuantumVariableNames = set(['qcrems', 'qctemplate', 'charge', 'mult', 'qcsuf', 'qm_ghost', 'qm_bondorder'])
+QuantumVariableNames = set(['qcrems', 'qctemplate', 'psitemplate', 'charge', 'mult', 'qcsuf', 'qm_ghost', 'qm_bondorder'])
 # Superset of all variable names.
 AllVariableNames = QuantumVariableNames | AtomVariableNames | MetaVariableNames | FrameVariableNames
 
@@ -1238,6 +1238,7 @@ class Molecule(object):
                          'xyz'      : self.read_xyz,
                          'mol2'     : self.read_mol2,
                          'qcin'     : self.read_qcin,
+                         'psiin'    : self.read_psiin, #JS addtion
                          'qcout'    : self.read_qcout,
                          'qcesp'    : self.read_qcesp,
                          'qdata'    : self.read_qdata,
@@ -1252,6 +1253,7 @@ class Molecule(object):
                           'mdcrd'   : self.write_mdcrd,
                           'pdb'     : self.write_pdb,
                           'qcin'    : self.write_qcin,
+                          'psiin'   : self.write_psiin, #JS addition
                           'qdata'   : self.write_qdata,
                           'tinker'  : self.write_arc}
         ## A funnel dictionary that takes redundant file types
@@ -1269,6 +1271,7 @@ class Molecule(object):
                           'txt'     : 'qdata',
                           'crd'     : 'charmm',
                           'cor'     : 'charmm',
+                          'dat'     : 'psiin', #JS addition, decided to refer to the dat extension for psiin, probably should change
                           'arc'     : 'tinker'}
         ## Creates entries like 'gromacs' : 'gromacs' and 'xyz' : 'xyz'
         ## in the Funnel
@@ -1979,7 +1982,7 @@ class Molecule(object):
         phis = []
         if 'bonds' in self.Data:
             if any(p not in self.bonds for p in [(min(i,j),max(i,j)),(min(j,k),max(j,k)),(min(k,l),max(k,l))]):
-                print [(min(i,j),max(i,j)),(min(j,k),max(j,k)),(min(k,l),max(k,l))]
+                print [(min(i+1,j+1),max(i+1,j+1)),(min(j+1,k+1),max(j+1,k+1)),(min(k+1,l+1),max(k+1,l+1))]
                 warn("Measuring dihedral angle for four atoms that aren't bonded.  Hope you know what you're doing!")
         else:
             warn("This molecule object doesn't have bonds defined, sanity-checking is off.")
@@ -2911,6 +2914,42 @@ class Molecule(object):
             Answer['qm_ghost'] = ghost
         return Answer
 
+    def read_psiin(self, fnm, **kwargs):
+        """Reads psi4 input"""
+        xyzs = [] #JS essentially a copy from engine.py
+        elem = []
+        found_molecule = False
+        template = [] # store a template of the input file for generating new ones
+        for line in open(fnm):
+            line = line.strip()
+            template.append(line)
+            if 'molecule' in line:
+                found_molecule = True
+            elif found_molecule is True:
+                if '}' in line:
+                    found_molecule = False
+                    line = line.replace("}","")
+                elif 'units angstrom' in line: #prevent units line from being interpreted as the charge
+                    found_molecule = False
+                    line = line.replace("units angstrom","")  #Probably should be changed if have different options in molecule section
+                ls = line.split()
+                if len(ls) == 2:
+                    charge, mult = int(ls[0]), int(ls[1])
+                elif len(ls) == 4:
+                    # parse the xyz format
+                    elem.append(ls[0])
+                    xyzs.append(ls[1:4])
+        Answer = {'psitemplate'  : template, #make the template psitemplate
+                 'charge'       : charge,
+                 'mult'         : mult,
+                }
+        if len(elem) > 0:
+            Answer['elem'] = elem
+        if len(xyzs) > 0:
+            Answer['xyzs'] = [np.array(xyzs, dtype=np.float64)]
+        return Answer
+ 
+
 
     def read_pdb(self, fnm, **kwargs):
         """ Loads a PDB and returns a dictionary containing its data. """
@@ -3473,6 +3512,32 @@ class Molecule(object):
                 out.append('@@@')
                 out.append('')
         return out
+    def write_psiin(self, selection, **kwargs):
+        self.require('elem', 'xyzs', 'psitemplate', 'charge', 'mult') #JS crank.py passes the template file for Psi4. This adds coordinates from an xyz file to it. Copied most parts from write_qcin
+        out = []
+        molecule_printed = False
+        for SI, I in enumerate(selection):
+           # for SectName in self.psitemplate:
+            #    out.append('%s' % SectName)
+               # for line in SectData:
+                #    out.append(line)
+             #   if SectName == 'molecule':
+              #          if molecule_printed == False:
+               #             molecule_printed = True
+                #            if self.na > 0:
+                 #             out.append("%i %i" % (self.charge, self.mult))
+                  #            an = 0
+                              for e, x in zip(reversed(self.elem), reversed(self.xyzs[I])):
+                                  an = 5
+				  pre = ''
+                                  suf = ''
+                                  out.append(pre + format_xyz_coord(e, x) + suf)
+                                  self.psitemplate.insert(an,pre+ format_xyz_coord(e, x) + suf)
+                                  an -= 1
+        return self.psitemplate
+
+
+
 
     def write_xyz(self, selection, **kwargs):
         self.require('elem','xyzs')

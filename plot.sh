@@ -1,7 +1,7 @@
 #!/bin/bash
 
 cat <<EOF > plot.gp
-set terminal pdf enhanced fname "Helvetica" fsize 5 size 2.5,2.5
+set terminal pdfcairo enhanced font "Helvetica" fontscale 0.5 size 5,5
 set output "scan.pdf"
 # set lmargin 0
 # set rmargin 0
