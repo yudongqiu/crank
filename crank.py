@@ -1042,7 +1042,7 @@ class DihedralGrid(object):
                             print "\rFound: %12s -> %12s" % (dih120, dih12),
                             self.stordir.append(dnm)
                             return dih12, dnm
-                        M1 = Molecule(os.path.join(dnm,"psi4gradient.dat"), ftype="psiin", build_topology=False)
+                        M1 = Molecule(os.path.join(dnm,"psi4.dat"), ftype="psiin", build_topology=False)
                         max1 = abs(M1.xyzs[0] - M0.xyzs[0]).max()
                         if max1 < 0.01:
                             E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
@@ -1104,12 +1104,12 @@ class DihedralGrid(object):
 #JS above allows for the constraints.txt file for optimize.py
             Q = deepcopy(M0)
             Q.add_quantum(os.path.join(dnm,'psi4.dat'))
-            Q.write(os.path.join(dnm,'psi4gradient.dat'), ftype="psiin")
+            Q.write(os.path.join(dnm,'psi4.dat'), ftype="psiin")
             schedule("optimize.py --psi4 psi4gradient.dat constraints.txt --qccnv --nt 1 &> optimize.log", verbose=False, # Single core #JS replaces opt-qchem.py with optimize.py
-                     input_files=[(os.path.join(dnm, "psi4gradient.dat"),"psi4gradient.dat"),
+                     input_files=[(os.path.join(dnm, "psi4.dat"),"psi4.dat"),
                                   (os.path.join(dnm, "constraints.txt"), "constraints.txt"),
                                   (os.path.join(based,"optimize.py"),"optimize.py")],
-                     output_files=[(os.path.join(dnm,"psi4gradient_optim.xyz"),"psi4gradient_optim.xyz"),
+                     output_files=[(os.path.join(dnm,"psi4_optim.xyz"),"psi4_optim.xyz"),
                                    (os.path.join(dnm,"energy.txt"),"energy.txt"),
                                    (os.path.join(dnm,"output.dat"), os.path.join("psi4gradient.tmp", "output.dat")), #JS optimize.py able to detect run.out
                                    (os.path.join(dnm,"optimize.log"), "optimize.log"),
@@ -1139,6 +1139,7 @@ class DihedralGrid(object):
             try:
                 E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
                 M1 = Molecule(os.path.join(dnm,"opt.xyz"))
+                # LPW hack to create optGrad.xyz if one does not exist.
             except:
                 print dih12, "optimization failed"
                 worked = False
@@ -1169,12 +1170,14 @@ class DihedralGrid(object):
                 self.energies[dih12] = E
                 self.optnext.append([neighbors(dih1, dih2), (dih1, dih2)])
                 self.geoms[dih12] = M1.xyzs[0]
+                self.grads[dih12] = F.xyzs[0]
             elif E + 0.01 < self.energies[dih12]: 
                 status = 1
                 self.energies[dih12] = E
                 if [neighbors(dih1, dih2), (dih1, dih2)] not in self.optnext:
                     self.optnext.append([neighbors(dih1, dih2), (dih1, dih2)])
                 self.geoms[dih12] = M1.xyzs[0]
+                self.grads[dih12] = F.xyzs[0]
             elif E - 0.01 < self.energies[dih12]:
                 status = 2
             else:
@@ -1240,7 +1243,7 @@ class DihedralGrid(object):
             # Unicode characters, woohoo!
             for j in rng:
                 if queued[(j,i)] == 1:
-                     line += '\x1b[1;41m＜\x1b[0m'
+                    line += '\x1b[1;41m＜\x1b[0m'
                 elif queued[(j,i)] == 2:
                     line += '\x1b[1;41m＞\x1b[0m'
                 elif queued[(j,i)] == 3:
@@ -1335,11 +1338,14 @@ class DihedralGrid(object):
         """ Print out the final energies to a file located in ALA/Scan/HF/scan.txt and also record the geometries. """
         mdnm = os.path.join(self.root, self.angles, self.method)
         xyzfin = []
+        enefin = []
+        grdfin = []
         commfin = []
         o = open(os.path.join(mdnm, 'scan.txt'),'w')
         for i in self.energies.items():
             if i[1]:
                 xyzfin.append(self.geoms[i[0]])
+                enefin.append(i[1]/627.51)
                 commfin.append("Dihedral Angles = "+','.join(["%i" % j for j in i[0]]))
                 print >> o, i[0][0], i[0][1], i[1]
         o.close()
@@ -1359,6 +1365,10 @@ class DihedralGrid(object):
         Mfin.comms = commfin
         Mfin.align(sorted(list(set([self.iA, self.iB, self.iC, self.iD, self.iE, self.iF, self.iG, self.iH]))))
         Mfin.write(os.path.join(mdnm, "scan.xyz"))
+        Mfin.qm_energies = enefin
+        if self.haveGrads:
+           Mfin.qm_grads = grdfin
+        Mfin.write(os.path.join(mdnm, "qdata.txt"))
         # Mfin.write(os.path.join(mdnm, "scan.pdb"))
 
 def main():
