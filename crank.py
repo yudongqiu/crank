@@ -1140,6 +1140,20 @@ class DihedralGrid(object):
                 E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
                 M1 = Molecule(os.path.join(dnm,"opt.xyz"))
                 # LPW hack to create optGrad.xyz if one does not exist.
+                if not os.path.exists(os.path.join(dnm,"optGrad.xyz")):
+                    print "LPW hack: Extracting %s and reading forces" % os.path.join(dnm,"qchem.out.bz2")
+                    # import IPython
+                    # IPython.embed()
+                    if os.path.exists(os.path.join(dnm,"qchem.out.bz2")):
+                        _exec("bunzip2 qchem.out.bz2", cwd=dnm, print_command=False)
+                    if not os.path.exists(os.path.join(dnm,"qchem.out")):
+                        raise RuntimeError("Argh?")
+                    Q = Molecule(os.path.join(dnm,"qchem.out"))[-1]
+                    Q.xyzs = Q.qm_grads
+                    Q.write(os.path.join(dnm,"optGrad.xyz"))
+                    _exec("bzip2 qchem.out", cwd=dnm, print_command=False)
+                F = Molecule(os.path.join(dnm,"optGrad.xyz"))
+                self.haveGrads = True
             except:
                 print dih12, "optimization failed"
                 worked = False
