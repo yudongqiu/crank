@@ -1170,6 +1170,11 @@ class DihedralGrid(object):
             try:
                 E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
                 M1 = Molecule(os.path.join(dnm,"opt.xyz"))
+                C = Molecule(os.path.join(dnm,"output.dat"), ftype="psiout")[-1]
+                C.write(os.path.join(dnm,"optGrad.xyz"))
+                F = Molecule(os.path.join(dnm,"optGrad.xyz"))
+                self.haveGrads = True
+
             except:
                 print dih12, "optimization failed"
                 worked = False
@@ -1394,7 +1399,7 @@ class DihedralGrid(object):
         if self.haveGrads:
            Mfin.qm_grads = grdfin
         Mfin.write(os.path.join(mdnm, "qdata.txt"))
-       # Mfin.write(os.path.join(mdnm, "scan.pdb"))
+        Mfin.write(os.path.join(mdnm, "scan.pdb"))
 
 def main():
     parser = argparse.ArgumentParser(description="Potential energy scan of two neighboring dihedral angles from -180 to 180 with a 24x24 grid.") #JS argparse for data entry
