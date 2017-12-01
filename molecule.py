@@ -87,8 +87,7 @@
 #|               To concatenate geometries:                           |#
 #|                 MyMol += MyMolB                                    |#
 #|                                                                    |#
-#======================================================================#
-
+#======================================================================# 
 #=========================================#
 #|     DECLARE VARIABLE NAMES HERE       |#
 #|                                       |#
@@ -1239,6 +1238,7 @@ class Molecule(object):
                          'mol2'     : self.read_mol2,
                          'qcin'     : self.read_qcin,
                          'psiin'    : self.read_psiin, #JS addtion
+                         'psiout'   : self.read_psiout,
                          'qcout'    : self.read_qcout,
                          'qcesp'    : self.read_qcesp,
                          'qdata'    : self.read_qdata,
@@ -3442,6 +3442,55 @@ class Molecule(object):
             Answer['modes'] = [i/np.linalg.norm(i) for i in unnorm]
 
         return Answer
+    def read_psiout(self, fnm, errok = [], **kwargs):
+    #This is just to write out the gradients from a psi4 calculation
+        xyzs = []
+        elem = []
+        firstelem = True
+        found_elems = False
+        found_elems2 = False
+        found_grads = False
+        found_grads2 = False
+        for line in open(fnm):
+            line = line.strip()
+            if 'Center' in line:
+                found_elems = True
+            elif found_elems is True:
+                if 'Nuclear repulsion' in line:
+                    found_elems = False
+                    firstelem = False
+                if '------------' in line:
+                    found_elems2 = True
+                elif found_elems2 is True and firstelem is True:
+                    if 'Nuclear respulsion' in line:
+                        found_elems2 = False
+                        firstelem = False
+                    ls = line.split()
+                    if len(ls) == 5 and firstelem is True:
+                        elem.append(ls[0])
+            if '-Total Gradient:' in line:
+                found_grads = True
+            elif found_grads is True:
+                if '*** tstop' in line:
+                    found_grads = False
+                if '------' in line:
+                    found_grads2 = True
+                elif found_grads2 is True:
+                    if '*** tstop' in line:
+                        found_grads2 is False
+                    ls = line.split()
+                    if len(ls) == 4:
+                        xyzs.append(ls[1:4])
+        Answer = {}
+        if len(elem) > 0:
+            Answer['elem'] = elem
+        if len(xyzs) > 0:
+            Answer['xyzs'] = [np.array(xyzs, dtype=np.float64)]
+
+
+        return Answer
+                       
+
 
     #=====================================#
     #|         Writing functions         |#
@@ -3549,7 +3598,6 @@ class Molecule(object):
             for i in range(self.na):
                 out.append(format_xyz_coord(self.elem[i],xyz[i]))
         return out
-
     def get_reaxff_atom_types(self):
         """
         Return a list of element names which maps the LAMMPS atom types

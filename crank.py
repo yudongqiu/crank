@@ -30,7 +30,7 @@ import argparse
 if __name__ == "__main__":
     # Create the Work Queue.  We will only have one instance because the
     # script will try to maximize the efficiency of resource utilization.
-    wq_port = 7325
+    wq_port = 7324
     work_queue.set_debug_flag('all')
     wq = work_queue.WorkQueue(port=wq_port, exclusive=False, shutdown=False)
     wq.tasks_failed = 0 # Counter for tasks that fail at the application level
@@ -123,6 +123,21 @@ basis                6-31{plus}g*
 geom_opt_max_cycles  150
 $end
 """
+# Q-Chem input file template for B97-D3
+# with the 6-31G* basis set.
+b97d3_qcfile="""
+$molecule
+{chg} {mult}
+$end
+
+$rem
+jobtype              opt
+exchange             b97-d3
+basis                6-31g*
+geom_opt_max_cycles  150
+$end
+"""
+
 
 # Q-Chem input file template for Hartree-Fock
 # with the 3-21G basis set.
@@ -196,6 +211,7 @@ MDict = {"AMOEBA"    : ("tinker", "amoebapro13.prm"),
          "AMBER99SB" : ("tinker", "amber99sb.prm"),
          "RIMP2"     : ("qchem", rimp2_qcfile),
          "B97D"      : ("qchem", b97d_qcfile),
+         "B97D3"     : ("qchem", b97d3_qcfile),
          "HF"        : ("qchem", hf_qcfile),
          "MP2"       : ("psi4", psi4_infile), #currently mapping MP2 for use with Psi4 JS 
          "None"      : (None, None)}
@@ -907,6 +923,8 @@ class DihedralGrid(object):
         # Initialize energy and geometry storage.
         self.energies = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
         self.geoms = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
+        self.grads = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
+        self.haveGrads = False
         # Set some labels and folders.
         self.name = name
         self.root = os.path.join("Scan", name)
@@ -1083,7 +1101,7 @@ class DihedralGrid(object):
             Q = deepcopy(M0)
             Q.add_quantum(os.path.join(dnm,'qtemp.in'))
             Q.write(os.path.join(dnm,'qchem.in'), ftype="qcin")
-            schedule("optimize.py --qchem qchem.in constraints.txt --qccnv --nt 1 &> optimize.log", verbose=False, # Single core #JS replaces opt-qchem.py with optimize.py
+            schedule("optimize.py --qchem qchem.in constraints.txt --qccnv --reset --nt 1 --epsilon 0.0 &> optimize.log", verbose=False, # Single core #JS replaces opt-qchem.py with optimize.py
                      input_files=[(os.path.join(dnm,"qchem.in"),"qchem.in"),
 			          (os.path.join(dnm, "constraints.txt"), "constraints.txt"),
                                   (os.path.join(based,"optimize.py"),"optimize.py")],
@@ -1105,13 +1123,13 @@ class DihedralGrid(object):
             Q = deepcopy(M0)
             Q.add_quantum(os.path.join(dnm,'psi4.dat'))
             Q.write(os.path.join(dnm,'psi4.dat'), ftype="psiin")
-            schedule("optimize.py --psi4 psi4gradient.dat constraints.txt --qccnv --nt 1 &> optimize.log", verbose=False, # Single core #JS replaces opt-qchem.py with optimize.py
+            schedule("optimize.py --psi4 psi4.dat constraints.txt --qccnv --reset --nt 1 --epsilon 0.0 &> optimize.log", verbose=False, # Single core #JS replaces opt-qchem.py with optimize.py
                      input_files=[(os.path.join(dnm, "psi4.dat"),"psi4.dat"),
                                   (os.path.join(dnm, "constraints.txt"), "constraints.txt"),
                                   (os.path.join(based,"optimize.py"),"optimize.py")],
                      output_files=[(os.path.join(dnm,"psi4_optim.xyz"),"psi4_optim.xyz"),
                                    (os.path.join(dnm,"energy.txt"),"energy.txt"),
-                                   (os.path.join(dnm,"output.dat"), os.path.join("psi4gradient.tmp", "output.dat")), #JS optimize.py able to detect run.out
+                                   (os.path.join(dnm,"output.dat"), os.path.join("psi4.tmp", "output.dat")), #JS optimize.py able to detect run.out
                                    (os.path.join(dnm,"optimize.log"), "optimize.log"),
                                    (os.path.join(dnm,"opt.xyz"),"opt.xyz")],
 
@@ -1140,18 +1158,9 @@ class DihedralGrid(object):
                 E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
                 M1 = Molecule(os.path.join(dnm,"opt.xyz"))
                 # LPW hack to create optGrad.xyz if one does not exist.
-                if not os.path.exists(os.path.join(dnm,"optGrad.xyz")):
-                    print "LPW hack: Extracting %s and reading forces" % os.path.join(dnm,"qchem.out.bz2")
-                    # import IPython
-                    # IPython.embed()
-                    if os.path.exists(os.path.join(dnm,"qchem.out.bz2")):
-                        _exec("bunzip2 qchem.out.bz2", cwd=dnm, print_command=False)
-                    if not os.path.exists(os.path.join(dnm,"qchem.out")):
-                        raise RuntimeError("Argh?")
-                    Q = Molecule(os.path.join(dnm,"qchem.out"))[-1]
-                    Q.xyzs = Q.qm_grads
-                    Q.write(os.path.join(dnm,"optGrad.xyz"))
-                    _exec("bzip2 qchem.out", cwd=dnm, print_command=False)
+                C = Molecule(os.path.join(dnm,"qchem_run.out"))[-1]
+                C.xyzs = C.qm_grads
+                C.write(os.path.join(dnm,"optGrad.xyz"))
                 F = Molecule(os.path.join(dnm,"optGrad.xyz"))
                 self.haveGrads = True
             except:
@@ -1161,6 +1170,11 @@ class DihedralGrid(object):
             try:
                 E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
                 M1 = Molecule(os.path.join(dnm,"opt.xyz"))
+                C = Molecule(os.path.join(dnm,"output.dat"), ftype="psiout")[-1]
+                C.write(os.path.join(dnm,"optGrad.xyz"))
+                F = Molecule(os.path.join(dnm,"optGrad.xyz"))
+                self.haveGrads = True
+
             except:
                 print dih12, "optimization failed"
                 worked = False
@@ -1361,6 +1375,8 @@ class DihedralGrid(object):
                 xyzfin.append(self.geoms[i[0]])
                 enefin.append(i[1]/627.51)
                 commfin.append("Dihedral Angles = "+','.join(["%i" % j for j in i[0]]))
+                if self.haveGrads:
+                   grdfin.append(self.grads[i[0]])
                 print >> o, i[0][0], i[0][1], i[1]
         o.close()
         o = open(os.path.join(mdnm, 'xy.txt'),'w')
@@ -1383,7 +1399,7 @@ class DihedralGrid(object):
         if self.haveGrads:
            Mfin.qm_grads = grdfin
         Mfin.write(os.path.join(mdnm, "qdata.txt"))
-        # Mfin.write(os.path.join(mdnm, "scan.pdb"))
+        Mfin.write(os.path.join(mdnm, "scan.pdb"))
 
 def main():
     parser = argparse.ArgumentParser(description="Potential energy scan of two neighboring dihedral angles from -180 to 180 with a 24x24 grid.") #JS argparse for data entry
