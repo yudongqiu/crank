@@ -30,7 +30,7 @@ import argparse
 if __name__ == "__main__":
     # Create the Work Queue.  We will only have one instance because the
     # script will try to maximize the efficiency of resource utilization.
-    wq_port = 7324
+    wq_port = 9251
     work_queue.set_debug_flag('all')
     wq = work_queue.WorkQueue(port=wq_port, exclusive=False, shutdown=False)
     wq.tasks_failed = 0 # Counter for tasks that fail at the application level
@@ -475,7 +475,7 @@ def print_summary():
     print "Jobs to be queued later:", 
     print ', '.join(["%s x %i" % (AA, HCounts[AA]) for AA in HCounts.keys() if HCounts[AA] > 0])
 
-def manage_wq(wait_intvl=1, print_time=1200):
+def manage_wq(wait_intvl=10, print_time=1200):
     """ 
     An adapted version of wq_wait1 from ForceBalance. 
     
@@ -919,7 +919,7 @@ class DihedralGrid(object):
     #     if self.method == "RIMP2" and self.chg < 0:
     #         self.template = rimp2_qcfile_1
 
-    def __init__(self, M, chg, mult, method, da, db, name):
+    def __init__(self, M, chg, mult, method, da, db, name, tcin=None):
         # Initialize energy and geometry storage.
         self.energies = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
         self.geoms = OrderedDict([(i, None) for i in list(itertools.product(rng, repeat=2))])
@@ -938,7 +938,11 @@ class DihedralGrid(object):
         self.lower = []
         # Method (a few are hard coded in this script)
         self.method = method
-        self.engine, self.template = MDict[method]
+        if tcin is not None:
+            self.tcin = tcin
+            self.engine = "terachem"
+        else:
+            self.engine, self.template = MDict[method]
         self.tmp = self.engine+".tmp" #JS optimize.py makes a qchem.tmp folder that contains a file needed for the optimization.
         if self.engine == "tinker":
             raise RuntimeError("TINKER not supported yet (need to read PDB files, unmangle atoms and whatnot)")
@@ -1134,9 +1138,31 @@ class DihedralGrid(object):
                                    (os.path.join(dnm,"opt.xyz"),"opt.xyz")],
 
                      name=self.aname, tag=dnm, prio=self.prio+self.iteration*100)
-
+        elif self.engine=="terachem": 
+            #shutil.copy2(self.tcin, os.path.join(dnm, "tera.in"))
+            with open(os.path.join(dnm,'constraints.txt'),'a') as f: print >> f, \
+                    dih12_qcfile.format(a=self.iA+1, b=self.iB+1, c=self.iC+1, d=self.iD+1,
+                                        e=self.iE+1, f=self.iF+1, g=self.iG+1, h=self.iH+1,
+                                        dih1=dih1, dih2=dih2)
+            Q = deepcopy(M0)
+            Q.write(os.path.join(dnm, 'start.xyz'))
+            from engine import edit_tcin
+            edit_tcin(fin=self.tcin, fout=os.path.join(dnm, "tera.in"), options={'coordinates':'start.xyz'})
+            #Q.add_quantum(os.path.join(dnm,'psi4.dat'))
+            #Q.write(os.path.join(dnm,'psi4.dat'), ftype="psiin")
+            schedule("/home/leeping/src/geometryopt/optimize.py tera.in constraints.txt --qccnv --reset --epsilon 0.0 &> optimize.log", verbose=False, # Single core #JS replaces opt-qchem.py with optimize.py
+                     input_files=[(os.path.join(dnm, "tera.in"),"tera.in"),
+                                  (os.path.join(dnm, "constraints.txt"), "constraints.txt"),
+                                  (os.path.join(dnm, "start.xyz"), "start.xyz")],
+                     output_files=[(os.path.join(dnm,"tera_optim.xyz"),"tera_optim.xyz"),
+                                   (os.path.join(dnm,"energy.txt"),"energy.txt"),
+                                   (os.path.join(dnm,"tera.out"), os.path.join("tera.tmp", "run.out")), #JS optimize.py able to detect run.out
+                                   (os.path.join(dnm,"optGrad.xyz"), os.path.join("tera.tmp", "scr", "grad.xyz")), #JS optimize.py able to detect run.out
+                                   (os.path.join(dnm,"optimize.log"), "optimize.log"),
+                                   (os.path.join(dnm,"opt.xyz"),"opt.xyz")],
+                     name=self.aname, tag=dnm, prio=self.prio+self.iteration*100)
         else:
-            print "Only the TINKER or Q-Chem engines are supported right now"
+            print "Only the TINKER, Q-Chem and/or TeraChem engines supported right now"
             sys.exit()
         return dih12, dnm
 
@@ -1178,7 +1204,16 @@ class DihedralGrid(object):
             except:
                 print dih12, "optimization failed"
                 worked = False
+        elif self.engine == "terachem": 
+            try:
+                E = 627.51*float(np.loadtxt(os.path.join(dnm,"energy.txt")))
+                M1 = Molecule(os.path.join(dnm,"opt.xyz"))
+                F = Molecule(os.path.join(dnm,"optGrad.xyz"))
+                self.haveGrads = True
 
+            except:
+                print dih12, "optimization failed"
+                worked = False
         else:
             print "Only the TINKER, Q-Chem or Psi4 engines are supported right now"
             sys.exit()
@@ -1404,14 +1439,25 @@ class DihedralGrid(object):
 def main():
     parser = argparse.ArgumentParser(description="Potential energy scan of two neighboring dihedral angles from -180 to 180 with a 24x24 grid.") #JS argparse for data entry
     parser.add_argument('--methodopt', type=str, default="None", choices=MDict.keys(), help='Enter scan method ')
-    parser.add_argument('input', type=str, help='Enter coordinate file')
+    parser.add_argument('--tcin', type=str, default="None", help='Enter TeraChem input file (overrides --methodopt and --charge) ')
+    parser.add_argument('input_coords', type=str, help='Enter coordinate file')
     parser.add_argument('indices', type=int, nargs=5, help='List of atoms that the dihedral scan will be performed on. Enter 5 atomic indices. First 4 will define the first dihedral, last 4 will define the second dihedral.')
     parser.add_argument('--charge', type=int, default=0,  action='store', help='Define the charge of the system')
     args = parser.parse_args()
-    method = args.methodopt
-    xyzfile = args.input
+    if args.tcin is not "None":
+        from engine import edit_tcin
+        tcin_dict = edit_tcin(args.tcin)
+        method = tcin_dict['method']+'_'+tcin_dict['basis']
+        charge = tcin_dict['charge']
+        mult   = tcin_dict['spinmult']
+        tcin_fnm = args.tcin
+    else:
+        method = args.methodopt
+        charge = args.charge 
+        mult   = 1
+        tcin_fnm = None
+    xyzfile = args.input_coords
     prefix = os.path.splitext(xyzfile)[0]
-    charge=args.charge 
     
     atom1, atom2, atom3, atom4, atom5 = args.indices 
     atom1 = atom1 - 1
@@ -1424,7 +1470,7 @@ def main():
     d1 = [atom1, atom2, atom3, atom4]
     d2 = [atom2, atom3, atom4, atom5]
 
-    DG = DihedralGrid(M, charge, 1, method, d1, d2, prefix)
+    DG = DihedralGrid(M, charge, mult, method, d1, d2, prefix, tcin=tcin_fnm)
 
     while True:
         # Determine which new optimizations to start
